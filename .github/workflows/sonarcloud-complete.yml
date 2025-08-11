@@ -10,8 +10,6 @@ jobs:
   sonarcloud:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
-    outputs:
-      quality_gate_status: ${{ steps.quality-gate.outputs.status }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,34 +46,87 @@ jobs:
         working-directory: ./front
         run: npm run test:ci
 
-      # Analyse SonarCloud + attente Quality Gate
+      # SonarCloud analysis AVEC attente du Quality Gate
       - name: SonarCloud Scan
-        id: sonarcloud
         uses: SonarSource/sonarcloud-github-action@master
         with:
           args: >
             -Dsonar.organization=vacheronpradelalyssa
             -Dsonar.projectKey=vacheronpradelalyssa_bobapp-complete
             -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      # Vérification du Quality Gate via l'API SonarCloud
+      # NOUVEAU : Vérifier le Quality Gate et créer l'artifact
       - name: Check Quality Gate Status
         id: quality-gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const projectKey = 'vacheronpradelalyssa_bobapp-complete';
+            const organization = 'vacheronpradelalyssa';
+            
+            try {
+              console.log('🔍 Checking Quality Gate status...');
+              
+              const response = await fetch(
+                `https://sonarcloud.io/api/qualitygates/project_status?projectKey=${projectKey}&organization=${organization}`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${{ secrets.SONAR_TOKEN }}`
+                  }
+                }
+              );
+              
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              
+              const data = await response.json();
+              const status = data.projectStatus.status;
+              
+              console.log(`📊 Quality Gate Status: ${status}`);
+              
+              if (status === 'OK') {
+                console.log('✅ Quality Gate PASSED');
+              } else {
+                console.log('❌ Quality Gate FAILED');
+                if (data.projectStatus.conditions) {
+                  console.log('📋 Failed conditions:');
+                  data.projectStatus.conditions.forEach(condition => {
+                    if (condition.status !== 'OK') {
+                      console.log(`  - ${condition.metricKey}: ${condition.actualValue} (required: ${condition.comparator} ${condition.errorThreshold})`);
+                    }
+                  });
+                }
+              }
+              
+              core.setOutput('status', status);
+              
+            } catch (error) {
+              console.log(`❌ Error checking Quality Gate: ${error.message}`);
+              core.setOutput('status', 'ERROR');
+            }
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          PROJECT_KEY="vacheronpradelalyssa_bobapp-complete"
-          STATUS=$(curl -s -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$PROJECT_KEY" | jq -r .projectStatus.status)
-          echo "Quality Gate status: $STATUS"
-          echo "$STATUS" > quality-gate.txt
-          echo "status=$STATUS" >> $GITHUB_OUTPUT
 
-      # Sauvegarde l'état du Quality Gate comme artefact
+      # NOUVEAU : Créer l'artifact avec le statut Quality Gate
+      - name: Create Quality Gate Artifact
+        run: |
+          echo "${{ steps.quality-gate.outputs.status }}" > quality-gate.txt
+          echo "Quality Gate status saved: ${{ steps.quality-gate.outputs.status }}"
+
       - name: Upload Quality Gate Status
         uses: actions/upload-artifact@v4
         with:
           name: quality-gate
           path: quality-gate.txt
+          retention-days: 1
+
+      - name: Analysis Complete
+        run: |
+          echo "🎉 SonarCloud Analysis completed!"
+          echo "📊 Quality Gate Status: ${{ steps.quality-gate.outputs.status }}"
+          echo "📋 Check details: https://sonarcloud.io/project/overview?id=vacheronpradelalyssa_bobapp-complete"
