@@ -1,43 +1,169 @@
-name: Frontend Tests & Coverage
+name: Docker Build & Publish
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["SonarCloud Backend Analysis", "SonarCloud Frontend Analysis"]
+    types: [completed]
+    branches: [main, develop]
 
 jobs:
-  Frontend-test:
+  check-and-build:
+    name: Check SonarCloud & Build Docker
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: front
+    # Seulement si le workflow qui vient de se terminer a réussi
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     
-    strategy:
-      matrix:
-        node-version: [18.x]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-          cache-dependency-path: front/package-lock.json
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Run tests with coverage
-        run: npm run test:prod
-      
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: front/coverage/
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Wait and Check Both Workflows
+      id: check-both
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const sha = context.sha;
+          
+          console.log(`Checking workflows for commit: ${sha}`);
+          
+          // Attendre un peu pour que l'autre workflow se termine
+          await new Promise(resolve => setTimeout(resolve, 30000)); // 30 secondes
+          
+          // Récupérer tous les workflow runs pour ce commit
+          const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+            owner,
+            repo,
+            head_sha: sha,
+            per_page: 100
+          });
+          
+          console.log(`Found ${runs.workflow_runs.length} workflow runs for this commit`);
+          
+          const backendRun = runs.workflow_runs.find(run => 
+            run.name === 'SonarCloud Backend Analysis' && run.head_sha === sha
+          );
+          const frontendRun = runs.workflow_runs.find(run => 
+            run.name === 'SonarCloud Frontend Analysis' && run.head_sha === sha
+          );
+          
+          if (!backendRun) {
+            console.log('❌ Backend workflow not found');
+            core.setOutput('should-build', 'false');
+            return;
+          }
+          
+          if (!frontendRun) {
+            console.log('❌ Frontend workflow not found');
+            core.setOutput('should-build', 'false');
+            return;
+          }
+          
+          console.log(`Backend status: ${backendRun.status} - ${backendRun.conclusion}`);
+          console.log(`Frontend status: ${frontendRun.status} - ${frontendRun.conclusion}`);
+          
+          if (backendRun.status !== 'completed' || frontendRun.status !== 'completed') {
+            console.log('⏳ One or both workflows still running, skipping...');
+            core.setOutput('should-build', 'false');
+            return;
+          }
+          
+          const bothSuccess = backendRun.conclusion === 'success' && 
+                            frontendRun.conclusion === 'success';
+          
+          console.log(`Both workflows passed: ${bothSuccess}`);
+          core.setOutput('should-build', bothSuccess.toString());
+
+    - name: Set up Docker Buildx
+      if: steps.check-both.outputs.should-build == 'true'
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker Images
+      if: steps.check-both.outputs.should-build == 'true'
+      run: |
+        echo "🔨 Building Docker images..."
+        echo "✅ Both SonarCloud workflows passed!"
+        docker build -t bobapp-backend:test ./back
+        docker build -t bobapp-frontend:test ./front
+        echo "✅ Images built successfully!"
+
+    - name: Test Images Locally
+      if: steps.check-both.outputs.should-build == 'true'
+      run: |
+        echo "🧪 Testing images locally..."
+        
+        # Test backend
+        docker run -d --name test-backend -p 8080:8080 bobapp-backend:test
+        sleep 15
+        
+        echo "Testing backend endpoint..."
+        curl -f http://localhost:8080/api/joke && echo "✅ Backend OK" || exit 1
+        
+        docker stop test-backend
+        docker rm test-backend
+        
+        # Test frontend  
+        docker run -d --name test-frontend -p 4020:80 bobapp-frontend:test
+        sleep 10
+        
+        echo "Testing frontend..."
+        curl -f http://localhost:4020 && echo "✅ Frontend OK" || exit 1
+        
+        docker stop test-frontend
+        docker rm test-frontend
+        
+        echo "✅ All tests passed!"
+
+    # Publication seulement si tout est OK ET sur main
+    - name: Login to Docker Hub
+      if: steps.check-both.outputs.should-build == 'true' && github.ref == 'refs/heads/main'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Extract metadata
+      if: steps.check-both.outputs.should-build == 'true' && github.ref == 'refs/heads/main'
+      id: meta
+      run: |
+        echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+        echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+    - name: Build and Push Backend
+      if: steps.check-both.outputs.should-build == 'true' && github.ref == 'refs/heads/main'
+      uses: docker/build-push-action@v5
+      with:
+        context: ./back
+        push: true
+        tags: |
+          vacheronalyssa/bobapp-backend:latest
+          vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.sha_short }}
+          vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.date }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and Push Frontend
+      if: steps.check-both.outputs.should-build == 'true' && github.ref == 'refs/heads/main'
+      uses: docker/build-push-action@v5
+      with:
+        context: ./front
+        push: true
+        tags: |
+          vacheronalyssa/bobapp-frontend:latest
+          vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.sha_short }}
+          vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.date }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Display Success
+      if: steps.check-both.outputs.should-build == 'true'
+      run: |
+        echo "🎉 Pipeline completed successfully!"
+        echo "✅ SonarCloud Backend: PASSED"
+        echo "✅ SonarCloud Frontend: PASSED"
+        echo "✅ Docker Build: SUCCESS"
+        if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          echo "✅ Docker Publish: SUCCESS"
+          echo "📦 Images published on Docker Hub"
+        fi
