@@ -22,41 +22,18 @@ jobs:
         with:
           java-version: 17
           distribution: 'temurin'
-      
       - name: Cache Maven dependencies
         uses: actions/cache@v4
         with:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
-      
       - name: Build Backend and Run Tests
         working-directory: ./back
         run: |
-          echo "🔨 Step 1: Copy dependencies..."
-          mvn dependency:copy-dependencies -DoutputDirectory=target/dependency -q
-          
-          echo "🔨 Step 2: Clean and verify with coverage..."
-          mvn clean verify -q
-          
-          echo "✅ Backend build completed!"
-          
-          # Debug: vérifier que tout existe
-          echo "=== Dependencies check ==="
-          if [ -d "target/dependency" ]; then
-            echo "✅ Dependencies folder exists with $(ls target/dependency | wc -l) files"
-            ls target/dependency/*.jar | head -5 || echo "No jar files found"
-          else
-            echo "❌ Dependencies folder missing"
-          fi
-          
-          echo "=== JaCoCo check ==="
-          if [ -f "target/site/jacoco/jacoco.xml" ]; then
-            echo "✅ JaCoCo report exists ($(wc -l < target/site/jacoco/jacoco.xml) lines)"
-          else
-            echo "❌ JaCoCo report missing"
-          fi
-          
+          mvn clean verify
+          # Le rapport JaCoCo sera généré ici : back/target/site/jacoco/jacoco.xml
+
       # Frontend (Node.js)
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -64,32 +41,16 @@ jobs:
           node-version: '18'
           cache: 'npm'
           cache-dependency-path: front/package-lock.json
-      
       - name: Install Frontend Dependencies
         working-directory: ./front
         run: npm ci
-      
       - name: Run Frontend Tests with Coverage
         working-directory: ./front
-        run: |
-          npm run test:ci
-          echo "✅ Frontend tests completed with coverage"
+        run: npm run test:ci # Ce script doit générer coverage/lcov.info
 
-      # Debug pour vérifier les fichiers
-      - name: Verify Coverage Files
-        run: |
-          echo "=== Backend Coverage ==="
-          ls -la back/target/site/jacoco/ || echo "❌ No jacoco report"
-          
-          echo "=== Frontend Coverage ==="
-          ls -la front/coverage/ || echo "❌ No frontend coverage"
-          
-          echo "=== Dependencies ==="
-          ls -la back/target/dependency/ || echo "❌ No dependencies"
-
-      # SonarCloud analysis avec nouveau projet
+      # SonarCloud analysis (unique étape !)
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        uses: SonarSource/sonarcloud-github-action@master
         with:
           args: >
             -Dsonar.organization=vacheronpradelalyssa
@@ -97,8 +58,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      - name: Analysis Complete
-        run: |
-          echo "🎉 SonarCloud Analysis completed for BobApp Complete!"
-          echo "📊 Check results at: https://sonarcloud.io/project/overview?id=vacheronpradelalyssa_bobapp-complete"
