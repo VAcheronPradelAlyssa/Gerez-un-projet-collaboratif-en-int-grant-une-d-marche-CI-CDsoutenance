@@ -22,8 +22,8 @@ jobs:
     - name: Build Docker Images
       run: |
         echo "🔨 Building Docker images..."
-        docker build -t test-bobapp-backend:test ./back
-        docker build -t test-bobapp-frontend:test ./front
+        docker build -t bobapp-backend:test ./back
+        docker build -t bobapp-frontend:test ./front
         echo "✅ Images built successfully!"
 
     - name: Test Images Locally
@@ -31,7 +31,7 @@ jobs:
         echo "🧪 Testing images locally..."
         
         # Test backend
-        docker run -d --name test-backend -p 8080:8080 test-bobapp-backend:test
+        docker run -d --name test-backend -p 8080:8080 bobapp-backend:test
         sleep 15
         
         echo "Testing backend endpoint..."
@@ -41,7 +41,7 @@ jobs:
         docker rm test-backend
         
         # Test frontend  
-        docker run -d --name test-frontend -p 4020:80 test-bobapp-frontend:test
+        docker run -d --name test-frontend -p 4020:80 bobapp-frontend:test
         sleep 10
         
         echo "Testing frontend..."
@@ -84,9 +84,9 @@ jobs:
         context: ./back
         push: true
         tags: |
-          vacheronalyssa/test-bobapp-backend:latest
-          vacheronalyssa/test-bobapp-backend:${{ steps.meta.outputs.sha_short }}
-          vacheronalyssa/test-bobapp-backend:${{ steps.meta.outputs.date }}
+          vacheronalyssa/bobapp-backend:latest
+          vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.sha_short }}
+          vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.date }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -96,9 +96,9 @@ jobs:
         context: ./front
         push: true
         tags: |
-          vacheronalyssa/test-bobapp-frontend:latest
-          vacheronalyssa/test-bobapp-frontend:${{ steps.meta.outputs.sha_short }}
-          vacheronalyssa/test-bobapp-frontend:${{ steps.meta.outputs.date }}
+          vacheronalyssa/bobapp-frontend:latest
+          vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.sha_short }}
+          vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.date }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -107,14 +107,14 @@ jobs:
         echo "🧪 Testing published images from Docker Hub..."
         
         # Test backend from Docker Hub
-        docker run -d --name hub-backend -p 8080:8080 vacheronalyssa/test-bobapp-backend:latest
+        docker run -d --name hub-backend -p 8080:8080 vacheronalyssa/bobapp-backend:latest
         sleep 20
         
         curl -f http://localhost:8080/api/joke && echo "✅ Backend from Docker Hub OK" || exit 1
         docker stop hub-backend && docker rm hub-backend
         
         # Test frontend from Docker Hub
-        docker run -d --name hub-frontend -p 4020:80 vacheronalyssa/test-bobapp-frontend:latest
+        docker run -d --name hub-frontend -p 4020:80 vacheronalyssa/bobapp-frontend:latest
         sleep 15
         
         curl -f http://localhost:4020 && echo "✅ Frontend from Docker Hub OK" || exit 1
@@ -125,7 +125,7 @@ jobs:
     - name: Display Image Info
       run: |
         echo "📦 Published images:"
-        echo "Backend: vacheronalyssa/test-bobapp-backend:latest"
-        echo "Backend: vacheronalyssa/test-bobapp-backend:${{ steps.meta.outputs.sha_short }}"
-        echo "Frontend: vacheronalyssa/test-bobapp-frontend:latest" 
-        echo "Frontend: vacheronalyssa/test-bobapp-frontend:${{ steps.meta.outputs.sha_short }}"
+        echo "Backend: vacheronalyssa/bobapp-backend:latest"
+        echo "Backend: vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.sha_short }}"
+        echo "Frontend: vacheronalyssa/bobapp-frontend:latest" 
+        echo "Frontend: vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.sha_short }}"
