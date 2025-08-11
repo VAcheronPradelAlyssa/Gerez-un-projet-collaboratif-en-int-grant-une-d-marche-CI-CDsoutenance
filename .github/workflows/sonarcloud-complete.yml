@@ -10,6 +10,8 @@ jobs:
   sonarcloud:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
+    outputs:
+      quality_gate_status: ${{ steps.quality-gate.outputs.status }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,9 +32,7 @@ jobs:
           restore-keys: ${{ runner.os }}-m2
       - name: Build Backend and Run Tests
         working-directory: ./back
-        run: |
-          mvn clean verify
-          # Le rapport JaCoCo sera généré ici : back/target/site/jacoco/jacoco.xml
+        run: mvn clean verify
 
       # Frontend (Node.js)
       - name: Set up Node.js
@@ -46,15 +46,36 @@ jobs:
         run: npm ci
       - name: Run Frontend Tests with Coverage
         working-directory: ./front
-        run: npm run test:ci # Ce script doit générer coverage/lcov.info
+        run: npm run test:ci
 
-      # SonarCloud analysis (unique étape !)
+      # Analyse SonarCloud + attente Quality Gate
       - name: SonarCloud Scan
+        id: sonarcloud
         uses: SonarSource/sonarcloud-github-action@master
         with:
           args: >
             -Dsonar.organization=vacheronpradelalyssa
             -Dsonar.projectKey=vacheronpradelalyssa_bobapp-complete
+            -Dsonar.qualitygate.wait=true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      # Vérification du Quality Gate via l'API SonarCloud
+      - name: Check Quality Gate Status
+        id: quality-gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          PROJECT_KEY="vacheronpradelalyssa_bobapp-complete"
+          STATUS=$(curl -s -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=$PROJECT_KEY" | jq -r .projectStatus.status)
+          echo "Quality Gate status: $STATUS"
+          echo "$STATUS" > quality-gate.txt
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      # Sauvegarde l'état du Quality Gate comme artefact
+      - name: Upload Quality Gate Status
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate
+          path: quality-gate.txt
