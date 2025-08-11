@@ -33,12 +33,30 @@ jobs:
       - name: Build Backend and Run Tests
         working-directory: ./back
         run: |
-          # Copier les dépendances pour SonarCloud
-          mvn dependency:copy-dependencies -DoutputDirectory=target/dependency
-          # Build et tests avec couverture JaCoCo
-          mvn clean verify
-          echo "✅ Backend build completed with coverage"
-
+          echo "🔨 Step 1: Copy dependencies..."
+          mvn dependency:copy-dependencies -DoutputDirectory=target/dependency -q
+          
+          echo "🔨 Step 2: Clean and verify with coverage..."
+          mvn clean verify -q
+          
+          echo "✅ Backend build completed!"
+          
+          # Debug: vérifier que tout existe
+          echo "=== Dependencies check ==="
+          if [ -d "target/dependency" ]; then
+            echo "✅ Dependencies folder exists with $(ls target/dependency | wc -l) files"
+            ls target/dependency/*.jar | head -5 || echo "No jar files found"
+          else
+            echo "❌ Dependencies folder missing"
+          fi
+          
+          echo "=== JaCoCo check ==="
+          if [ -f "target/site/jacoco/jacoco.xml" ]; then
+            echo "✅ JaCoCo report exists ($(wc -l < target/site/jacoco/jacoco.xml) lines)"
+          else
+            echo "❌ JaCoCo report missing"
+          fi
+          
       # Frontend (Node.js)
       - name: Set up Node.js
         uses: actions/setup-node@v4
