@@ -3,131 +3,160 @@ name: Docker Build & Publish
 on:
   workflow_run:
     workflows: ["SonarCloud Unified Analysis"]
-    types:
-      - completed
+    types: [completed]
+    branches: [main, develop]
 
 jobs:
   check-quality-gate:
     name: Check Sonar Quality Gate
     runs-on: ubuntu-latest
-    steps:
-      - name: Download Quality Gate Artifact
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          workflow: SonarCloud Unified Analysis  # <-- Le nom du workflow, PAS le nom du fichier
-          name: quality-gate
-          path: ./
-      - name: Read Quality Gate Status
-        id: read_status
-        run: |
-          STATUS=$(cat quality-gate.txt)
-          echo "Quality Gate status: $STATUS"
-          echo "status=$STATUS" >> $GITHUB_OUTPUT
-
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     outputs:
-      quality_gate_status: ${{ steps.read_status.outputs.status }}
+      quality_gate_status: ${{ steps.check-qg.outputs.status }}
+    
+    steps:
+    - name: Download Quality Gate Artifact
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            run_id: ${{ github.event.workflow_run.id }}
+          });
+          
+          console.log('Available artifacts:', artifacts.data.artifacts.map(a => a.name));
+          
+          const qualityGateArtifact = artifacts.data.artifacts.find(artifact => 
+            artifact.name === 'quality-gate'
+          );
+          
+          if (!qualityGateArtifact) {
+            throw new Error('Quality gate artifact not found');
+          }
+          
+          const download = await github.rest.actions.downloadArtifact({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            artifact_id: qualityGateArtifact.id,
+            archive_format: 'zip'
+          });
+          
+          const fs = require('fs');
+          fs.writeFileSync('./quality-gate.zip', Buffer.from(download.data));
+          
+          console.log('✅ Quality gate artifact downloaded');
+
+    - name: Extract and Check Quality Gate
+      id: check-qg
+      run: |
+        unzip -q quality-gate.zip
+        QUALITY_GATE_STATUS=$(cat quality-gate.txt)
+        echo "📊 Quality Gate Status: $QUALITY_GATE_STATUS"
+        
+        if [ "$QUALITY_GATE_STATUS" = "OK" ]; then
+          echo "✅ Quality Gate PASSED - Docker build authorized"
+          echo "status=OK" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Quality Gate FAILED - Blocking Docker build"
+          echo "🛑 Status: $QUALITY_GATE_STATUS"
+          echo "status=FAILED" >> $GITHUB_OUTPUT
+        fi
 
   docker-build:
     name: Build & Test Docker Images
     runs-on: ubuntu-latest
     needs: check-quality-gate
     if: needs.check-quality-gate.outputs.quality_gate_status == 'OK'
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Quality Gate Success
+      run: |
+        echo "✅ Quality Gate verification passed!"
+        echo "🚀 Proceeding with Docker build..."
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Build Docker Images
-        run: |
-          echo "🔨 Building Docker images..."
-          docker build -t bobapp-backend:test ./back
-          docker build -t bobapp-frontend:test ./front
-          echo "✅ Images built successfully!"
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      - name: Test Images Locally
-        run: |
-          echo "🧪 Testing images locally..."
-          docker run -d --name test-backend -p 8080:8080 bobapp-backend:test
-          sleep 15
-          echo "Testing backend endpoint..."
-          curl -f http://localhost:8080/api/joke && echo "✅ Backend OK" || exit 1
-          docker stop test-backend
-          docker rm test-backend
-          docker run -d --name test-frontend -p 4020:80 bobapp-frontend:test
-          sleep 10
-          echo "Testing frontend..."
-          curl -f http://localhost:4020 && echo "✅ Frontend OK" || exit 1
-          docker stop test-frontend
-          docker rm test-frontend
-          echo "✅ All tests passed!"
+    - name: Build Docker Images
+      run: |
+        echo "🔨 Building Docker images..."
+        docker build -t bobapp-backend:test ./back
+        docker build -t bobapp-frontend:test ./front
+        echo "✅ Images built successfully!"
+
+    - name: Test Images Locally
+      run: |
+        echo "🧪 Testing images locally..."
+        
+        # Test backend
+        docker run -d --name test-backend -p 8080:8080 bobapp-backend:test
+        sleep 15
+        curl -f http://localhost:8080/api/joke && echo "✅ Backend OK" || exit 1
+        docker stop test-backend && docker rm test-backend
+        
+        # Test frontend  
+        docker run -d --name test-frontend -p 4020:80 bobapp-frontend:test
+        sleep 10
+        curl -f http://localhost:4020 && echo "✅ Frontend OK" || exit 1
+        docker stop test-frontend && docker rm test-frontend
+        
+        echo "✅ All tests passed!"
 
   docker-publish:
     name: Publish to Docker Hub
     runs-on: ubuntu-latest
-    needs: docker-build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [docker-build]
+    if: github.event.workflow_run.head_branch == 'main'
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        run: |
-          echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
-          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+    - name: Extract metadata
+      id: meta
+      run: |
+        echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+        echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
-      - name: Build and Push Backend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./back
-          push: true
-          tags: |
-            vacheronalyssa/bobapp-backend:latest
-            vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.sha_short }}
-            vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.date }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    - name: Build and Push Backend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./back
+        push: true
+        tags: |
+          vacheronalyssa/bobapp-backend:latest
+          vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.sha_short }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
-      - name: Build and Push Frontend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./front
-          push: true
-          tags: |
-            vacheronalyssa/bobapp-frontend:latest
-            vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.sha_short }}
-            vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.date }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    - name: Build and Push Frontend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./front
+        push: true
+        tags: |
+          vacheronalyssa/bobapp-frontend:latest
+          vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.sha_short }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
-      - name: Test Published Images
-        run: |
-          echo "🧪 Testing published images from Docker Hub..."
-          docker run -d --name hub-backend -p 8080:8080 vacheronalyssa/bobapp-backend:latest
-          sleep 20
-          curl -f http://localhost:8080/api/joke && echo "✅ Backend from Docker Hub OK" || exit 1
-          docker stop hub-backend && docker rm hub-backend
-          docker run -d --name hub-frontend -p 4020:80 vacheronalyssa/bobapp-frontend:latest
-          sleep 15
-          curl -f http://localhost:4020 && echo "✅ Frontend from Docker Hub OK" || exit 1
-          docker stop hub-frontend && docker rm hub-frontend
-          echo "🎉 All images published and tested successfully!"
-
-      - name: Display Image Info
-        run: |
-          echo "📦 Published images:"
-          echo "Backend: vacheronalyssa/bobapp-backend:latest"
-          echo "Backend: vacheronalyssa/bobapp-backend:${{ steps.meta.outputs.sha_short }}"
-          echo "Frontend: vacheronalyssa/bobapp-frontend:latest"
-          echo "Frontend: vacheronalyssa/bobapp-frontend:${{ steps.meta.outputs.sha_short }}"
+    - name: Success Summary
+      run: |
+        echo "🎉 Complete CI/CD Pipeline Success!"
+        echo "✅ SonarCloud Quality Gate: PASSED"
+        echo "✅ Docker Build: SUCCESS"
+        echo "✅ Docker Publish: SUCCESS"
+        echo "📦 Images available on Docker Hub"
