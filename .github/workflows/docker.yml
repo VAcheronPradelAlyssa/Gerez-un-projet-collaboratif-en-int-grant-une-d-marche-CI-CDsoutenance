@@ -7,17 +7,64 @@ on:
     branches: [main, develop]
 
 jobs:
+  check-prerequisites:
+    name: Check Both SonarCloud Workflows
+    runs-on: ubuntu-latest
+    outputs:
+      both-passed: ${{ steps.check.outputs.result }}
+    
+    steps:
+    - name: Check Both Workflows Status
+      id: check
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const sha = context.sha;
+          
+          // Récupérer les deux derniers workflow runs pour ce commit
+          const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+            owner,
+            repo,
+            head_sha: sha,
+            status: 'completed'
+          });
+          
+          const backendRun = runs.workflow_runs.find(run => 
+            run.name === 'SonarCloud Backend Analysis'
+          );
+          const frontendRun = runs.workflow_runs.find(run => 
+            run.name === 'SonarCloud Frontend Analysis'
+          );
+          
+          if (!backendRun || !frontendRun) {
+            console.log('⏳ Waiting for both workflows to complete...');
+            core.setOutput('result', 'false');
+            return;
+          }
+          
+          const bothSuccess = backendRun.conclusion === 'success' && 
+                            frontendRun.conclusion === 'success';
+          
+          console.log(`Backend: ${backendRun.conclusion}`);
+          console.log(`Frontend: ${frontendRun.conclusion}`);
+          console.log(`Both passed: ${bothSuccess}`);
+          
+          core.setOutput('result', bothSuccess.toString());
+
   # Build et test des images Docker
   docker-build:
     name: Build & Test Docker Images
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    needs: [check-prerequisites]
+    if: needs.check-prerequisites.outputs.both-passed == 'true'
     
     steps:
-    - name: Verify SonarCloud Success
+    - name: Success Message
       run: |
-        echo "✅ SonarCloud analyses completed successfully!"
-        echo "Proceeding with Docker build..."
+        echo "✅ Both SonarCloud workflows passed!"
+        echo "🚀 Proceeding with Docker build..."
     
     - name: Checkout code
       uses: actions/checkout@v4
