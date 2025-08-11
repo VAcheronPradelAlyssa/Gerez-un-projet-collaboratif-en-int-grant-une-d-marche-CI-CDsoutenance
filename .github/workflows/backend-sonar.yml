@@ -47,4 +47,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_BACK }}
         run: |
           mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+            -Dsonar.projectKey=VAcheronPradelAlyssa_Gerez-un-projet-collaboratif-en-int-grant-une-d-marche-CI-CDsoutenance_backend \
+            -Dsonar.organization=vacheronpradelalyssa \
             -Dsonar.host.url=https://sonarcloud.io
