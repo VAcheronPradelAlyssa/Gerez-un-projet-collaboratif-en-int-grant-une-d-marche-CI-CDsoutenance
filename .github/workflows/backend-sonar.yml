@@ -38,11 +38,15 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          key: ${{ runner.os }}-m2-${{ hashFiles('back/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
       
       - name: Build and analyze
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_BACK }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=vacheronpradelalyssa_test_backend -Dsonar.organization=vacheronpradelalyssa
+        run: |
+          mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+            -Dsonar.projectKey=VAcheronPradelAlyssa_Gerez-un-projet-collaboratif-en-int-grant-une-d-marche-CI-CDsoutenance_backend \
+            -Dsonar.organization=vacheronpradelalyssa \
+            -Dsonar.host.url=https://sonarcloud.io
