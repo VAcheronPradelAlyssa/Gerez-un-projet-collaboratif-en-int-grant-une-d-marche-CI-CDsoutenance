@@ -22,17 +22,22 @@ jobs:
         with:
           java-version: 17
           distribution: 'temurin'
+      
       - name: Cache Maven dependencies
         uses: actions/cache@v4
         with:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
+      
       - name: Build Backend and Run Tests
         working-directory: ./back
         run: |
+          # Copier les dépendances pour SonarCloud
+          mvn dependency:copy-dependencies -DoutputDirectory=target/dependency
+          # Build et tests avec couverture JaCoCo
           mvn clean verify
-          # Le rapport JaCoCo sera généré ici : back/target/site/jacoco/jacoco.xml
+          echo "✅ Backend build completed with coverage"
 
       # Frontend (Node.js)
       - name: Set up Node.js
@@ -41,20 +46,41 @@ jobs:
           node-version: '18'
           cache: 'npm'
           cache-dependency-path: front/package-lock.json
+      
       - name: Install Frontend Dependencies
         working-directory: ./front
         run: npm ci
+      
       - name: Run Frontend Tests with Coverage
         working-directory: ./front
-        run: npm run test:ci # Ce script doit générer coverage/lcov.info
+        run: |
+          npm run test:ci
+          echo "✅ Frontend tests completed with coverage"
 
-      # SonarCloud analysis (unique étape !)
+      # Debug pour vérifier les fichiers
+      - name: Verify Coverage Files
+        run: |
+          echo "=== Backend Coverage ==="
+          ls -la back/target/site/jacoco/ || echo "❌ No jacoco report"
+          
+          echo "=== Frontend Coverage ==="
+          ls -la front/coverage/ || echo "❌ No frontend coverage"
+          
+          echo "=== Dependencies ==="
+          ls -la back/target/dependency/ || echo "❌ No dependencies"
+
+      # SonarCloud analysis avec nouveau projet
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarqube-scan-action@v5.0.0
         with:
           args: >
             -Dsonar.organization=vacheronpradelalyssa
-            -Dsonar.projectKey=VAcheronPradelAlyssa_CI-CD
+            -Dsonar.projectKey=vacheronpradelalyssa_bobapp-complete
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Analysis Complete
+        run: |
+          echo "🎉 SonarCloud Analysis completed for BobApp Complete!"
+          echo "📊 Check results at: https://sonarcloud.io/project/overview?id=vacheronpradelalyssa_bobapp-complete"
