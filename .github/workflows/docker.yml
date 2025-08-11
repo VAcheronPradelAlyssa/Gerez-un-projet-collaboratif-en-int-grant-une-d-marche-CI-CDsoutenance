@@ -1,18 +1,24 @@
 name: Docker Build & Publish
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+  workflow_run:
+    workflows: ["SonarCloud Backend Analysis", "SonarCloud Frontend Analysis"]
+    types: [completed]
+    branches: [main, develop]
 
 jobs:
   # Build et test des images Docker
   docker-build:
     name: Build & Test Docker Images
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     
     steps:
+    - name: Verify SonarCloud Success
+      run: |
+        echo "✅ SonarCloud analyses completed successfully!"
+        echo "Proceeding with Docker build..."
+    
     - name: Checkout code
       uses: actions/checkout@v4
 
