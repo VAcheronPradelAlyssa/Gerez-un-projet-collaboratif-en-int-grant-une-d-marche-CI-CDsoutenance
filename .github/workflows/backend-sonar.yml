@@ -1,20 +1,15 @@
-name: Backend SonarCloud Analysis
+name: SonarCloud Backend Analysis
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'back/**'
   pull_request:
-    branches:
-      - main
-    paths:
-      - 'back/**'
-  workflow_dispatch:
+    types: [opened, synchronize, reopened]
 
 jobs:
-  sonarcloud-backend:
+  Backend:
+    name: Backend Analysis
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,20 +34,15 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
       
-      - name: Cache Maven dependencies
+      - name: Cache Maven packages
         uses: actions/cache@v3
         with:
           path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('back/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-m2-
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
       
       - name: Build and analyze
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  # Utilisez le même token
-        run: |
-          mvn clean verify sonar:sonar \
-            -Dsonar.projectKey=VOTRE_BACKEND_PROJECT_KEY \
-            -Dsonar.organization=VOTRE_VRAIE_ORGANIZATION_KEY \
-            -Dsonar.host.url=https://sonarcloud.io
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_BACK }}
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=vacheronpradelalyssa_test_backend -Dsonar.organization=vacheronpradelalyssa
